@@ -1,10 +1,15 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-import os
-import uuid
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from sqlalchemy.orm import Session
+import cloudinary.uploader
+from app.utils.cloudinary_config import cloudinary
+from app.database.postgres import get_db
+from app.schemas.image_schema import ImageCreate
+from app.models.image_model import Image
+from app.ml_models.clip_model import generate_image_embedding
+from app.database.vector_db import store_embedding
+
 
 router = APIRouter()
-
-UPLOAD_DIR = "app/storage/uploads"
 
 EXTENSION_MAP = {
     "image/jpeg": "jpg",
@@ -15,46 +20,88 @@ EXTENSION_MAP = {
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
 
-@router.post("/upload-image")
-async def upload_image(file: UploadFile = File(...)):
+# @router.post("/upload-image")
+# async def upload_image(
+#     file: UploadFile = File(...),
+#     db: Session = Depends(get_db)
+# ):
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+#     if file.content_type not in EXTENSION_MAP:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Only jpg, png, webp allowed"
+#         )
+
+#     size = 0
+#     chunks = []
+
+#     while chunk := await file.read(1024 * 1024):  # 1MB chunks
+#         size += len(chunk)
+
+#         if size > MAX_FILE_SIZE:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="File too large"
+#             )
+
+#         chunks.append(chunk)
+
+#     contents = b"".join(chunks)
+
+#     result = cloudinary.uploader.upload(
+#         contents,
+#         folder="ai_images_folder"
+#     )
+
+#     image_url = result["secure_url"]
+
+#     new_image = Image(image_url = image_url)
+#     db.add(new_image)
+#     db.commit()
+#     db.refresh(new_image)
+
+#     return {
+#         "image_url": image_url,
+#         "status": "uploaded"
+#     }
+
+
+@router.post("/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
 
     if file.content_type not in EXTENSION_MAP:
         raise HTTPException(
             status_code=400,
-            detail="Only jpg, jpeg, png, webp allowed"
+            detail="Only jpg, png, webp allowed"
         )
 
-    file_id = str(uuid.uuid4())
-    extension = EXTENSION_MAP[file.content_type]
+    contents = await file.read()
 
-    filename = f"{file_id}.{extension}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="File too large"
+        )
 
-    size = 0
+    result = cloudinary.uploader.upload(
+        contents,
+        folder="ai_images_folder"
+    )
 
-    try:
-        with open(file_path, "wb") as buffer:
+    image_url = result["secure_url"]
+    embendding = generate_image_embedding(image_url)
+    print("embendding vector :",embendding)
+    store_embedding(embedding=embendding , image_path=image_url)
 
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-
-                if size > MAX_FILE_SIZE:
-                    buffer.close()
-                    os.remove(file_path)
-
-                    raise HTTPException(
-                        status_code=400,
-                        detail="File too large"
-                    )
-
-                buffer.write(chunk)
-
-    finally:
-        await file.close()
+    # new_image = Image(image_url=image_url)
+    # db.add(new_image)
+    # db.commit()
+    # db.refresh(new_image)
 
     return {
-        "filename": filename,
+        "image_url": image_url,
         "status": "uploaded"
     }

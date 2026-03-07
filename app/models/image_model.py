@@ -7,3 +7,4 @@ class Image(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     image_url = Column(String, nullable=False)
+    embedding_id = Column(String,nullable=False)
